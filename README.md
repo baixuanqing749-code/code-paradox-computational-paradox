@@ -156,7 +156,7 @@ contact = """
 
 引用本证据时请注明:
 "33-degree quantum optimality angle evidence repository"
-GitHub: https://github.com/[您的用户名]/[仓库名]
+GitHub: https://github.com/baixuanqing749-code/
 
 注意: 本文件创建于2025年12月，所有时间戳由GitHub版本控制系统自动记录。
 """
