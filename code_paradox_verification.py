@@ -1,217 +1,166 @@
 """
-代码悖论验证 - 主要验证脚本
-作者: baixuanqing749
-创建时间: 2024-11-07
+代码悖论验证脚本
+运行：python verification.py
 """
 
 import numpy as np
 import time
 import hashlib
 import json
-from typing import Dict, List, Tuple, Any
+from typing import Dict, Any, List, Tuple
+from dataclasses import dataclass
 
-def measure_determinism(func, n_tests: int = 100) -> Tuple[bool, float]:
+@dataclass
+class TestResult:
+    """测试结果数据类"""
+    function_name: str
+    is_deterministic: bool
+    time_sensitivity: float  # 时间变异系数CV
+    collision_rate: float    # 碰撞率
+    paradox_exists: bool
+
+def test_determinism(func, n_tests: int = 100) -> bool:
     """
-    测量函数的确定性
-    
-    参数:
-        func: 要测试的函数
-        n_tests: 测试次数
-    
-    返回:
-        (是否确定, 不一致比例)
+    测试函数确定性
     """
-    inconsistencies = 0
-    
-    # 生成随机测试输入
-    np.random.seed(42)  # 固定种子保证可重复
-    test_inputs = np.random.randint(0, 2**20, n_tests)
+    # 随机测试输入
+    np.random.seed(42)
+    test_inputs = np.random.randint(0, 1000, n_tests)
     
     for x in test_inputs:
-        # 运行函数两次
-        result1 = func(x)
-        result2 = func(x)
+        # 运行多次检查一致性
+        results = []
+        for _ in range(5):
+            results.append(func(x))
         
-        if result1 != result2:
-            inconsistencies += 1
+        if not all(r == results[0] for r in results):
+            return False
     
-    inconsistency_rate = inconsistencies / n_tests
-    is_deterministic = inconsistency_rate == 0
-    
-    return is_deterministic, inconsistency_rate
+    return True
 
-def measure_sensitivity(func, base_input: int = 1000000, n_variations: int = 100) -> Tuple[float, Dict]:
+def test_sensitivity(func, base_input: int = 1000000) -> float:
     """
-    测量函数的敏感性（执行时间变化）
-    
-    参数:
-        func: 要测试的函数
-        base_input: 基础输入值
-        n_variations: 变化次数
-    
-    返回:
-        (变异系数CV, 时间统计信息)
+    测试时间敏感性，返回变异系数(CV)
     """
     execution_times = []
     
-    # 生成微小变化
-    for delta in range(n_variations):
-        input_val = base_input + delta
+    # 测试微小输入变化
+    for delta in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]:
+        x = base_input + delta
         
-        # 测量执行时间（多次取平均）
+        # 多次测量取平均
         times = []
-        for _ in range(5):  # 5次测量平均
+        for _ in range(10):
             start = time.perf_counter_ns()
-            _ = func(input_val)
+            _ = func(x)
             end = time.perf_counter_ns()
             times.append(end - start)
         
-        avg_time = np.mean(times)
-        execution_times.append(avg_time)
-    
-    # 计算统计信息
-    times_ns = np.array(execution_times)
-    
-    stats = {
-        'avg_time': float(np.mean(times_ns)),
-        'std_time': float(np.std(times_ns)),
-        'min_time': float(np.min(times_ns)),
-        'max_time': float(np.max(times_ns)),
-        'n_measurements': len(execution_times)
-    }
+        execution_times.append(np.mean(times))
     
     # 计算变异系数
-    if stats['avg_time'] > 0:
-        cv = stats['std_time'] / stats['avg_time']
-    else:
-        cv = 0.0
-    
-    return float(cv), stats
+    times_array = np.array(execution_times)
+    if np.mean(times_array) > 0:
+        return np.std(times_array) / np.mean(times_array)
+    return 0.0
 
-def measure_reversibility(func, n_samples: int = 1000) -> Tuple[bool, float]:
+def test_reversibility(func, n_samples: int = 1000) -> float:
     """
-    测量函数的信息可逆性（单射性）
-    
-    参数:
-        func: 要测试的函数
-        n_samples: 测试样本数
-    
-    返回:
-        (是否单射, 碰撞率)
+    测试可逆性（单射性），返回碰撞率
     """
     outputs = {}
     collisions = 0
     
-    np.random.seed(137)  # 固定种子
-    for _ in range(n_samples):
-        x = np.random.randint(0, 2**31)
-        y = func(x)
-        
+    for i in range(n_samples):
+        y = func(i)
         if y in outputs:
             collisions += 1
         else:
-            outputs[y] = x
+            outputs[y] = i
     
-    collision_rate = collisions / n_samples
-    is_injective = collisions == 0
-    
-    return is_injective, collision_rate
+    return collisions / n_samples
 
-def test_paradox(func, func_name: str = "测试函数") -> Dict[str, Any]:
+def run_comprehensive_test():
     """
-    综合测试函数的代码悖论特性
-    
-    参数:
-        func: 要测试的函数
-        func_name: 函数名称
-    
-    返回:
-        测试结果字典
+    运行综合测试
     """
-    print(f"\n{'='*60}")
-    print(f"测试函数: {func_name}")
-    print(f"{'='*60}")
-    
-    # 1. 测试确定性
-    print("\n[1] 确定性测试...")
-    is_det, det_rate = measure_determinism(func, 50)
-    print(f"   是否确定: {'✅' if is_det else '❌'}")
-    print(f"   不一致比例: {det_rate:.6f}")
-    
-    # 2. 测试敏感性
-    print("\n[2] 敏感性测试...")
-    cv, time_stats = measure_sensitivity(func, 1000000, 50)
-    print(f"   时间变异系数(CV): {cv:.4f}")
-    print(f"   平均执行时间: {time_stats['avg_time']:.1f} ns")
-    print(f"   敏感(CV>0.01): {'✅' if cv > 0.01 else '❌'}")
-    
-    # 3. 测试可逆性
-    print("\n[3] 可逆性测试...")
-    is_inj, coll_rate = measure_reversibility(func, 500)
-    print(f"   是否单射: {'✅' if is_inj else '❌'}")
-    print(f"   碰撞率: {coll_rate:.6f}")
-    print(f"   可逆(碰撞率<0.001): {'✅' if coll_rate < 0.001 else '❌'}")
-    
-    # 4. 判断悖论是否存在
-    paradox_exists = is_det and (cv > 0.01) and (coll_rate < 0.001)
-    
-    print(f"\n{'='*60}")
-    print(f"结论: 代码悖论 {'存在 ✅' if paradox_exists else '不存在 ❌'}")
-    print(f"{'='*60}")
-    
-    return {
-        'function_name': func_name,
-        'deterministic': is_det,
-        'determinism_rate': det_rate,
-        'sensitivity_cv': cv,
-        'time_statistics': time_stats,
-        'injective': is_inj,
-        'collision_rate': coll_rate,
-        'paradox_exists': paradox_exists,
-        'timestamp': time.time()
-    }
-
-def main():
-    """主函数：测试多个函数"""
-    print("代码悖论验证程序")
-    print("版本: 1.0.0")
-    print("作者: baixuanqing749")
-    print("=" * 60)
+    print("=== 代码悖论综合验证 ===")
+    print("=" * 50)
     
     # 定义测试函数
     test_functions = [
         ("identity", lambda x: x),
-        ("constant", lambda x: 42),
         ("linear", lambda x: (1664525 * x + 1013904223) & 0xFFFFFFFF),
         ("hash_trunc8", lambda x: int(hashlib.sha256(str(x).encode()).hexdigest()[:8], 16)),
+        ("constant", lambda x: 42),
     ]
     
     results = []
     
     for name, func in test_functions:
-        result = test_paradox(func, name)
+        print(f"\n测试函数: {name}")
+        
+        # 测试三个特性
+        is_det = test_determinism(func)
+        sensitivity = test_sensitivity(func)
+        collision_rate = test_reversibility(func)
+        
+        # 判断悖论是否存在
+        paradox = (is_det and sensitivity > 0.01 and collision_rate < 0.001)
+        
+        # 创建结果对象
+        result = TestResult(
+            function_name=name,
+            is_deterministic=is_det,
+            time_sensitivity=sensitivity,
+            collision_rate=collision_rate,
+            paradox_exists=paradox
+        )
+        
         results.append(result)
-    
-    # 保存结果
-    with open('results.json', 'w', encoding='utf-8') as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
+        
+        # 打印结果
+        print(f"  确定性: {'✅' if is_det else '❌'}")
+        print(f"  敏感性(CV): {sensitivity:.4f} {'✅' if sensitivity > 0.01 else '❌'}")
+        print(f"  碰撞率: {collision_rate:.6f} {'✅' if collision_rate < 0.001 else '❌'}")
+        print(f"  代码悖论: {'✅' if paradox else '❌'}")
     
     # 统计总结
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 50)
     print("测试总结:")
-    print("=" * 60)
     
-    n_paradox = sum(1 for r in results if r['paradox_exists'])
-    print(f"测试函数总数: {len(results)}")
-    print(f"显示悖论的函数数: {n_paradox}")
-    print(f"悖论比例: {n_paradox/len(results)*100:.1f}%")
+    paradox_count = sum(1 for r in results if r.paradox_exists)
+    print(f"测试函数总数: {len(test_functions)}")
+    print(f"显示悖论的函数数: {paradox_count}")
+    print(f"悖论比例: {paradox_count/len(test_functions):.1%}")
     
-    for r in results:
-        status = '✅' if r['paradox_exists'] else '❌'
-        print(f"{r['function_name']}: {status}")
+    # 保存结果到JSON文件
+    results_dict = [
+        {
+            'function': r.function_name,
+            'deterministic': r.is_deterministic,
+            'sensitivity': r.time_sensitivity,
+            'collision_rate': r.collision_rate,
+            'paradox': r.paradox_exists
+        }
+        for r in results
+    ]
     
-    print("\n结果已保存到 results.json")
-    print("验证完成！")
+    with open('test_results.json', 'w') as f:
+        json.dump(results_dict, f, indent=2)
+    
+    print("\n详细结果已保存到 test_results.json")
+    
+    return results
 
 if __name__ == "__main__":
-    main()
+    print("代码悖论验证程序")
+    print("开始验证...")
+    print("=" * 50)
+    
+    try:
+        results = run_comprehensive_test()
+        print("\n✅ 验证完成！")
+    except Exception as e:
+        print(f"\n❌ 验证出错: {e}")
+        print("请确保已安装所需库: pip install numpy")
